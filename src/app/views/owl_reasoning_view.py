@@ -127,7 +127,8 @@ class OwlReasoningView:
         # 补全效果一览：重计算（遍历推断边 + 影响闭包），默认不触发，避免切 Step4 卡顿。
         # 仅在「刚执行过补全且写回成功」或用户手动加载时才计算。
         auto_load = bool(result and not result.get("errors") and result.get("written_to_graph", 0) > 0)
-        if auto_load:
+        # 仅在尚未设置时写入，避免渲染期间重复触发状态更新导致重渲染循环
+        if auto_load and not st.session_state.get(SessionKeys.OWL_BENEFIT_LOADED):
             st.session_state[SessionKeys.OWL_BENEFIT_LOADED] = True
 
         if st.session_state.get(SessionKeys.OWL_BENEFIT_LOADED) or auto_load:
