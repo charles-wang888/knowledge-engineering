@@ -47,6 +47,7 @@ class BaseWeaviateStore(ABC):
         raise NotImplementedError
 
     def _ensure_client_and_schema(self) -> None:
+        import os
         import weaviate
         from weaviate.classes.config import Configure
 
@@ -56,6 +57,11 @@ class BaseWeaviateStore(ABC):
             except Exception:
                 pass
             self._client = None
+
+        # 清除代理环境变量，防止 gRPC/HTTP 连接被系统代理拦截
+        for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            os.environ.pop(k, None)
+        os.environ["NO_PROXY"] = os.environ.get("NO_PROXY", "") + ",localhost,127.0.0.1"
 
         host, port, secure = self._parse_url(self._url)
         conn_kw: dict[str, Any] = dict(
@@ -85,11 +91,20 @@ class BaseWeaviateStore(ABC):
                 except Exception:
                     vec_index = Configure.VectorIndex.hnsw(distance_metric="cosine")  # type: ignore[arg-type]
                 try:
-                    client.collections.create(
-                        name=self._collection_name,
-                        vector_config=Configure.Vectors.self_provided(vector_index_config=vec_index),
-                        properties=props,
-                    )
+                    # v4.10+: Configure.Vectors; v4.4-4.9: vectorizer_config=None + vector_index_config
+                    if hasattr(Configure, "Vectors"):
+                        client.collections.create(
+                            name=self._collection_name,
+                            vector_config=Configure.Vectors.self_provided(vector_index_config=vec_index),
+                            properties=props,
+                        )
+                    else:
+                        client.collections.create(
+                            name=self._collection_name,
+                            vectorizer_config=Configure.Vectorizer.none(),
+                            vector_index_config=vec_index,
+                            properties=props,
+                        )
                 except TypeError:
                     params = inspect.signature(Configure.VectorIndex.hnsw).parameters
                     kwargs: dict[str, Any] = {}

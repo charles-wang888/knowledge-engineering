@@ -1,6 +1,6 @@
 # 项目配置：当前目标代码库为 mall-swarm
 repo:
-  path: "D:/Development/工作区Workspace/工作区-人工智能/代码知识工程/被测试的项目/mall-swarm"
+  path: "/Users/wangshanhe/Desktop/myproject/mall-swarm"
   version: 1.0.0
   language: java
   modules:
@@ -161,16 +161,15 @@ knowledge:
     neo4j_database: "neo4j"
   vectordb-code:
     enabled: true
-    backend: weaviate   # 源代码向量库：存放方法代码片段，entity_id 与图谱方法节点一致
+    backend: weaviate    # Weaviate 1.24 单机版 + client 4.6.7
     dimension: 1024
     weaviate_url: "http://localhost:8080"
     weaviate_grpc_port: 50051
-    weaviate_api_key: "user-a-key"   # 若 Weaviate 开启 API Key 认证，需与 AUTHENTICATION_APIKEY_ALLOWED_KEYS 中的值一致
+    weaviate_api_key: "user-a-key"
     collection_name: "CodeEntity"
-    # allow_fallback_to_memory: false  # 默认 false：Weaviate 失败时不静默改内存库
   vectordb-interpret:
     enabled: true
-    backend: weaviate
+    backend: memory
     dimension: 1024
     weaviate_url: "http://localhost:8080"
     weaviate_grpc_port: 50051
@@ -178,7 +177,7 @@ knowledge:
     collection_name: "MethodInterpretation"
   vectordb-business:
     enabled: true
-    backend: weaviate
+    backend: memory
     dimension: 1024
     weaviate_url: "http://localhost:8080"
     weaviate_grpc_port: 50051
@@ -186,35 +185,46 @@ knowledge:
     collection_name: "BusinessInterpretation"
   method_interpretation:
     enabled: true
-    language: zh          # zh | en
-    # LLM：ollama | openai | anthropic（后两者需 pip install -e ".[llm-openai]" 或 llm-anthropic）
-    llm_backend: ollama
-    ollama_base_url: "http://127.0.0.1:11434"
-    ollama_model: "qwen2.5:32b"
-    timeout_seconds: 120
-    max_methods: 2000       # 0 表示全部方法；调试可改为 20
-    # llm_allow_fallback_to_ollama: false  # 默认 false：openai/anthropic 缺依赖时直接报错，不设 true 则不回退 Ollama
-    # openai 示例（可与 ollama 字段并存，仅 llm_backend 切换生效）：
-    # llm_backend: openai
-    # openai_api_key: ""     # 或使用环境变量 OPENAI_API_KEY
-    # openai_base_url: ""    # 留空=官方 API；可填 Azure/转发网关等兼容地址
-    # openai_model: "gpt-4o-mini"
-    # openai_max_tokens: 4096
-    # anthropic 示例：
-    # llm_backend: anthropic
-    # anthropic_api_key: ""  # 或 ANTHROPIC_API_KEY
-    # anthropic_model: "claude-3-5-sonnet-20241022"
-    # anthropic_max_tokens: 8192
+    language: zh
+    llm_backend: multi                # 双LLM负载均衡：Qwen + MiniMax 轮询
+    timeout_seconds: 90
+    max_methods: 2000
+    max_workers: 8                    # 8路并发，两个平台各分一半
+    multi_providers:
+      - name: qwen
+        backend: openai
+        openai_api_key: "sk-sp-a0500def35904c299f60885ba9e8fb8a"
+        openai_base_url: "https://coding.dashscope.aliyuncs.com/v1"
+        openai_model: "qwen3.5-plus"
+        timeout_seconds: 90
+      - name: minimax
+        backend: openai
+        openai_api_key: "sk-cp-e6KP84n0STVUVo4S2NNRr1FefEQKUm5PHXDgT61RcvP2qV_ho6w-cNVfIDu2vnF5T2JysSUfqDi8Ra5sm8LvuiBt_ViJDTMI04L4slZ61cRFi_Xf-v6PUPY"
+        openai_base_url: "https://api.minimax.chat/v1"
+        openai_model: "MiniMax-M2.5"
+        timeout_seconds: 120
   business_interpretation:
     enabled: true
     language: zh
-    llm_backend: ollama
-    ollama_base_url: "http://127.0.0.1:11434"
-    ollama_model: "qwen2.5:32b"
-    timeout_seconds: 180
+    llm_backend: multi
+    timeout_seconds: 120
     max_classes: 80
     max_apis: 120
     max_modules: 10
+    max_workers: 6
+    multi_providers:
+      - name: qwen
+        backend: openai
+        openai_api_key: "sk-sp-a0500def35904c299f60885ba9e8fb8a"
+        openai_base_url: "https://coding.dashscope.aliyuncs.com/v1"
+        openai_model: "qwen3.5-plus"
+        timeout_seconds: 90
+      - name: minimax
+        backend: openai
+        openai_api_key: "sk-cp-e6KP84n0STVUVo4S2NNRr1FefEQKUm5PHXDgT61RcvP2qV_ho6w-cNVfIDu2vnF5T2JysSUfqDi8Ra5sm8LvuiBt_ViJDTMI04L4slZ61cRFi_Xf-v6PUPY"
+        openai_base_url: "https://api.minimax.chat/v1"
+        openai_model: "MiniMax-M2.5"
+        timeout_seconds: 120
   snapshot:
     save_after_build: false
   # OWL 本体与推理（可选）

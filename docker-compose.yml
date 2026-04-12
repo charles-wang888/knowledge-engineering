@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: ke-neo4j
+    ports:
+      - "7474:7474"   # Web UI
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/12345678
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.28.4
+    container_name: ke-weaviate
+    ports:
+      - "8080:8080"   # HTTP
+      - "50051:50051" # gRPC
+    environment:
+      QUERY_DEFAULTS_LIMIT: 100
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: "user-a-key"
+      AUTHENTICATION_APIKEY_USERS: "admin"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      CLUSTER_HOSTNAME: "node1"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  weaviate_data:

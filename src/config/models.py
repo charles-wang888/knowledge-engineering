@@ -77,7 +77,8 @@ class MethodInterpretationConfig(BaseModel):
     ollama_model: str = "qwen2.5:32b"
     timeout_seconds: int = 120
     max_methods: int = 0
-    # ollama | openai | anthropic
+    max_workers: int = 4  # LLM 并发调用数（Ollama 建议 2-4，云端 API 可设 8-20）
+    # ollama | openai | anthropic | multi（多LLM负载均衡）
     llm_backend: str = "ollama"
     # --- OpenAI 及兼容 API（llm_backend: openai）---
     openai_api_key: Optional[str] = None
@@ -90,6 +91,8 @@ class MethodInterpretationConfig(BaseModel):
     anthropic_max_tokens: int = 8192
     # openai/anthropic 缺少 Python 依赖时是否回退 Ollama（默认否）
     llm_allow_fallback_to_ollama: bool = False
+    # --- Multi Provider（llm_backend: multi）--- 多LLM轮询负载均衡
+    multi_providers: Optional[list[dict]] = None
 
 
 class BusinessInterpretationConfig(BaseModel):
@@ -102,6 +105,8 @@ class BusinessInterpretationConfig(BaseModel):
     max_classes: int = 0
     max_apis: int = 0
     max_modules: int = 0
+    max_workers: int = 4  # LLM 并发调用数
+    # ollama | openai | anthropic | multi
     llm_backend: str = "ollama"
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
@@ -111,6 +116,7 @@ class BusinessInterpretationConfig(BaseModel):
     anthropic_model: str = "claude-3-5-sonnet-20241022"
     anthropic_max_tokens: int = 8192
     llm_allow_fallback_to_ollama: bool = False
+    multi_providers: Optional[list[dict]] = None
 
 
 class SnapshotConfig(BaseModel):

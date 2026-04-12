@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from typing import Optional
 import urllib.error
@@ -12,6 +13,7 @@ import urllib.request
 DEFAULT_DIM = 1024
 
 _ollama_cfg: Optional[dict] = None
+_cfg_lock = threading.Lock()
 
 
 def get_embedding(text: str, dimension: int = DEFAULT_DIM) -> list[float]:
@@ -43,23 +45,26 @@ def _load_ollama_cfg() -> dict:
     global _ollama_cfg
     if _ollama_cfg is not None:
         return _ollama_cfg
-    base = Path(__file__).resolve().parents[2]  # 项目根
-    cfg_path = base / "config" / "project.yaml"
-    cfg: dict = {}
-    try:
-        import yaml
+    with _cfg_lock:
+        if _ollama_cfg is not None:  # double-check after acquiring lock
+            return _ollama_cfg
+        base = Path(__file__).resolve().parents[2]  # 项目根
+        cfg_path = base / "config" / "project.yaml"
+        cfg: dict = {}
+        try:
+            import yaml
 
-        if cfg_path.exists():
-            raw = cfg_path.read_text(encoding="utf-8")
-            cfg = yaml.safe_load(raw) or {}
-    except Exception:
-        cfg = {}
-    knowledge = cfg.get("knowledge") or {}
-    sem = knowledge.get("semantic_embedding") or {}
-    _ollama_cfg = {
-        "base_url": sem.get("ollama_base_url") or "http://127.0.0.1:11434",
-        "model": sem.get("ollama_model") or "bge-m3",
-    }
+            if cfg_path.exists():
+                raw = cfg_path.read_text(encoding="utf-8")
+                cfg = yaml.safe_load(raw) or {}
+        except Exception:
+            cfg = {}
+        knowledge = cfg.get("knowledge") or {}
+        sem = knowledge.get("semantic_embedding") or {}
+        _ollama_cfg = {
+            "base_url": sem.get("ollama_base_url") or "http://127.0.0.1:11434",
+            "model": sem.get("ollama_model") or "bge-m3",
+        }
     return _ollama_cfg
 
 

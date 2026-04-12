@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional
 
 from src.models.structure import EntityType, RelationType, StructureFacts, StructureEntity, StructureRelation
@@ -277,7 +279,19 @@ def run_method_interpretations(
             nonlocal ok, fail
             total = len(items_seq) or 1
             timeout_sec = int(mi.timeout_seconds or 120)
-            for i, method in enumerate(items_seq):
+            max_workers = max(1, int(getattr(mi, "max_workers", 4) or 4))
+            counter_lock = threading.Lock()
+            processed_count = 0
+
+            # 进度预估
+            if runner.step_callback and total > 1:
+                est_min = total * 25 / max_workers / 60
+                runner.step(
+                    f"技术解读开始：{total} 个方法，并发 {max_workers} 路，预计 {est_min:.0f} 分钟"
+                )
+
+            def _process_one(method: StructureEntity) -> tuple[int, int]:
+                """单个方法的解读处理（线程安全）。"""
                 snippet = (method.attributes or {}).get("code_snippet") or ""
                 class_id, ctx, related_ids = _build_method_context(method, structure_facts)
                 sig = (method.attributes or {}).get("signature") or method.name
@@ -306,7 +320,7 @@ def run_method_interpretations(
                         related_entity_ids_json=json.dumps(rids, ensure_ascii=False),
                     )
 
-                o, f = interpret_one_llm_embed_store(
+                return interpret_one_llm_embed_store(
                     runner,
                     display_label,
                     InterpretPhase.TECH,
@@ -317,12 +331,26 @@ def run_method_interpretations(
                     embedding_dim=dim,
                     persist=_persist,
                 )
-                ok += o
-                fail += f
 
-                if runner.progress_callback:
-                    pct = 85 + int(15 * (i + 1) / total)
-                    runner.progress(min(pct, 99), 100, f"技术解读 {i + 1}/{total}…")
+            # 分批并行处理，每批 batch_size 个方法
+            batch_size = max(max_workers * 2, 20)
+            for batch_start in range(0, total, batch_size):
+                batch = items_seq[batch_start : batch_start + batch_size]
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {pool.submit(_process_one, m): m for m in batch}
+                    for future in as_completed(futures):
+                        try:
+                            o, f = future.result()
+                        except Exception:
+                            _LOG.exception("技术解读：并发任务异常（已计入失败）")
+                            o, f = 0, 1
+                        with counter_lock:
+                            ok += o
+                            fail += f
+                            processed_count += 1
+                        if runner.progress_callback:
+                            pct = 85 + int(15 * processed_count / total)
+                            runner.progress(min(pct, 99), 100, f"技术解读 {processed_count}/{total}…")
 
         _run_items(todo_methods)
 
