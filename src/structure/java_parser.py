@@ -10,6 +10,8 @@ from javalang.tree import (
     ClassDeclaration,
     MethodDeclaration,
     InterfaceDeclaration,
+    EnumDeclaration,
+    AnnotationDeclaration,
     MethodInvocation,
     Annotation,
     ReturnStatement,
@@ -198,7 +200,7 @@ class JavaStructureExtractor:
             # 本体建模：file 与 package 无任何关系；class/interface 与 package 为 BELONGS_TO（见 _process_type_decl）
 
         for type_decl in tree.types or []:
-            if isinstance(type_decl, (ClassDeclaration, InterfaceDeclaration)):
+            if isinstance(type_decl, (ClassDeclaration, InterfaceDeclaration, EnumDeclaration, AnnotationDeclaration)):
                 self._process_type_decl(
                     type_decl, fitem, source, file_id, pkg_id,
                     source_code=text, package_name=pkg_name, import_list=import_list,
@@ -206,7 +208,7 @@ class JavaStructureExtractor:
 
     def _process_type_decl(
         self,
-        type_decl: ClassDeclaration | InterfaceDeclaration,
+        type_decl: ClassDeclaration | InterfaceDeclaration | EnumDeclaration | AnnotationDeclaration,
         fitem: FileItem,
         source: CodeInputSource,
         file_id: str,
@@ -217,8 +219,14 @@ class JavaStructureExtractor:
         import_list: Optional[list] = None,
     ) -> None:
         name = type_decl.name
-        is_interface = isinstance(type_decl, InterfaceDeclaration)
-        type_entity = EntityType.INTERFACE if is_interface else EntityType.CLASS
+        if isinstance(type_decl, EnumDeclaration):
+            type_entity = EntityType.ENUM
+        elif isinstance(type_decl, AnnotationDeclaration):
+            type_entity = EntityType.ANNOTATION_TYPE
+        elif isinstance(type_decl, InterfaceDeclaration):
+            type_entity = EntityType.INTERFACE
+        else:
+            type_entity = EntityType.CLASS
         class_id = _stable_id("class", fitem.path, name)
         self._class_ids[(fitem.path, name)] = class_id
 
@@ -266,8 +274,36 @@ class JavaStructureExtractor:
         parent_class_full = method_calls.get_parent_class_full(
             getattr(type_decl, "extends", None), package_name or None, import_list
         )
+
+        # 枚举常量提取（EnumDeclaration 特有）
+        if isinstance(type_decl, EnumDeclaration) and hasattr(type_decl, "body") and type_decl.body:
+            enum_body = type_decl.body
+            # 枚举常量 → FIELD 实体
+            for const in getattr(enum_body, "constants", None) or []:
+                const_name = getattr(const, "name", None)
+                if const_name:
+                    const_id = _stable_id("field", class_id, const_name)
+                    line = const.position.line if const.position else None
+                    loc = f"{fitem.path}:{line}" if line else fitem.path
+                    self.entities.append(
+                        StructureEntity(
+                            id=const_id, type=EntityType.FIELD, name=const_name,
+                            location=loc, module_id=fitem.module_id, language="java",
+                            attributes={"is_enum_constant": True, "class_name": name},
+                        )
+                    )
+                    self.relations.append(StructureRelation(type=RelationType.CONTAINS, source_id=class_id, target_id=const_id))
+            # 枚举的方法/字段在 body.declarations 中
+            members_iter = getattr(enum_body, "declarations", None) or []
+        elif isinstance(type_decl, AnnotationDeclaration):
+            # 注解的元素在 body 中（AnnotationMethod 节点）
+            members_iter = type_decl.body or []
+        else:
+            # 普通类/接口
+            members_iter = type_decl.body or []
+
         # 方法
-        for member in type_decl.body or []:
+        for member in members_iter:
             if isinstance(member, MethodDeclaration):
                 self._process_method(
                     member, class_id, fitem,
