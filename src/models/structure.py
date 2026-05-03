@@ -14,6 +14,8 @@ class EntityType(str, Enum):
     PACKAGE = "package"
     CLASS = "class"
     INTERFACE = "interface"
+    ENUM = "enum"
+    ANNOTATION_TYPE = "annotation_type"
     METHOD = "method"
     FIELD = "field"
     PARAMETER = "parameter"

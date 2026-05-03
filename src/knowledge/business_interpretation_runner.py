@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional
 
 from src.models import StructureFacts, EntityType, DomainKnowledge
@@ -185,19 +187,22 @@ def run_business_interpretations(
             pct_cap: int,
             msg_prefix: str,
         ) -> int:
-            """统一循环：LLM -> embedding -> store.add，并通过 runner 回调更新 UI。返回成功数。"""
+            """统一循环：LLM -> embedding -> store.add，并行执行，通过 runner 回调更新 UI。返回成功数。"""
             nonlocal ok, fail, processed
             if not items_seq:
                 return 0
             local_ok = 0
-            for i, it in enumerate(items_seq):
+            max_workers = max(1, int(getattr(bi, "max_workers", 4) or 4))
+            counter_lock = threading.Lock()
+
+            def _process_one(it: Any) -> tuple[int, int]:
                 label = label_fn(it)
                 prompt = prompt_fn(it)
 
                 def _persist(text: str, vec: list[float], item=it) -> tuple[bool, bool]:
                     return weaviate_store.add_with_created(vec, **add_kwargs_fn(item, text))
 
-                o, f = interpret_one_llm_embed_store(
+                return interpret_one_llm_embed_store(
                     runner,
                     label,
                     InterpretPhase.BIZ,
@@ -208,13 +213,26 @@ def run_business_interpretations(
                     embedding_dim=dim,
                     persist=_persist,
                 )
-                ok += o
-                fail += f
-                local_ok += o
-                processed += 1
-                if progress_callback and total_targets:
-                    pct = 78 + int(pct_cap * processed / total_targets)
-                    runner.progress(min(pct, 99), 100, f"{msg_prefix} {i + 1}/{len(items_seq)}…")
+
+            batch_size = max(max_workers * 2, 10)
+            for batch_start in range(0, len(items_seq), batch_size):
+                batch = items_seq[batch_start : batch_start + batch_size]
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {pool.submit(_process_one, it): it for it in batch}
+                    for future in as_completed(futures):
+                        try:
+                            o, f = future.result()
+                        except Exception:
+                            _LOG.exception("业务解读：并发任务异常（已计入失败）")
+                            o, f = 0, 1
+                        with counter_lock:
+                            ok += o
+                            fail += f
+                            local_ok += o
+                            processed += 1
+                        if progress_callback and total_targets:
+                            pct = 78 + int(pct_cap * processed / total_targets)
+                            runner.progress(min(pct, 99), 100, f"{msg_prefix} {processed}/{total_targets}…")
             return local_ok
 
         # 1. 类/Service 级

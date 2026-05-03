@@ -108,11 +108,44 @@ def _build_anthropic_backend(kwargs: dict[str, Any], allow_fallback: bool, reque
         )
 
 
+def _build_multi_backend(kwargs: dict[str, Any], allow_fallback: bool, requested: str) -> LLMProviderSelection:
+    """构建多LLM负载均衡 Provider。需要 multi_providers 配置列表。"""
+    from .multi_provider import MultiProvider
+
+    providers_cfg: list[dict[str, Any]] = kwargs.get("multi_providers") or []
+    if not providers_cfg:
+        raise ValueError(
+            "llm_backend=multi 需要在配置中提供 multi_providers 列表，"
+            "每项包含 backend/openai_base_url/openai_api_key/openai_model 等字段"
+        )
+
+    providers = []
+    names = []
+    for i, pcfg in enumerate(providers_cfg):
+        sub_backend = (pcfg.get("backend") or "openai").strip().lower()
+        sub_builder = _LLM_BACKEND_BUILDERS.get(sub_backend)
+        if sub_builder is None:
+            raise ValueError(f"multi_providers[{i}]: 未知 backend '{sub_backend}'")
+        sub_kwargs = {k: v for k, v in pcfg.items() if k != "backend"}
+        sub_sel = sub_builder(sub_kwargs, allow_fallback, sub_backend)
+        providers.append(sub_sel.provider)
+        names.append(pcfg.get("name") or f"{sub_backend}-{i}")
+
+    multi = MultiProvider(providers, names)
+    return LLMProviderSelection(
+        provider=multi,
+        requested_backend="multi",
+        resolved_backend=f"multi({','.join(names)})",
+        fallback_reason="",
+    )
+
+
 def _install_default_llm_backends() -> None:
     if _LLM_BACKEND_BUILDERS:
         return
     register_llm_backend("openai", _build_openai_backend)
     register_llm_backend("anthropic", _build_anthropic_backend)
+    register_llm_backend("multi", _build_multi_backend)
 
 
 _install_default_llm_backends()
@@ -138,6 +171,7 @@ class LLMProviderFactory:
             "anthropic_model": m.anthropic_model,
             "anthropic_max_tokens": m.anthropic_max_tokens,
             "llm_allow_fallback_to_ollama": m.llm_allow_fallback_to_ollama,
+            "multi_providers": getattr(m, "multi_providers", None),
         }
 
     @staticmethod
